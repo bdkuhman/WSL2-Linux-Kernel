@@ -5236,9 +5236,25 @@ static int __net_init iscsi_net_init(struct net *net)
 
 static void __net_exit iscsi_net_exit(struct net *net)
 {
+	struct iscsi_cls_session *session, *tmp;
 	struct iscsi_net *isn;
+	unsigned long flags;
+	LIST_HEAD(sessions);
 
 	isn = net_generic(net, iscsi_net_id);
+
+	spin_lock_irqsave(&isn->sesslock, flags);
+	list_replace_init(&isn->sesslist, &sessions);
+	spin_unlock_irqrestore(&isn->sesslock, flags);
+
+	/* force session destruction, there is no userspace anymore */
+	list_for_each_entry_safe(session, tmp, &sessions, sess_list) {
+		device_for_each_child(&session->dev, NULL,
+				      iscsi_iter_force_destroy_conn_fn);
+		flush_work(&session->destroy_work);
+		__iscsi_destroy_session(&session->destroy_work);
+	}
+
 	netlink_kernel_release(isn->nls);
 	isn->nls = NULL;
 }
