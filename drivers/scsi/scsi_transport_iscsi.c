@@ -191,6 +191,8 @@ static struct net *iscsi_endpoint_net(struct iscsi_endpoint *ep)
 	struct Scsi_Host *shost = iscsi_endpoint_to_shost(ep);
 	struct iscsi_cls_host *ihost;
 
+	if (ep->netns)
+		return ep->netns;
 	if (!shost)
 		return &init_net;
 	ihost = shost->shost_data;
@@ -229,7 +231,7 @@ static struct attribute_group iscsi_endpoint_group = {
 };
 
 struct iscsi_endpoint *
-iscsi_create_endpoint(struct Scsi_Host *shost, int dd_size)
+__iscsi_create_endpoint(struct Scsi_Host *shost, int dd_size, struct net *net)
 {
 	struct iscsi_endpoint *ep;
 	int err, id;
@@ -257,6 +259,8 @@ iscsi_create_endpoint(struct Scsi_Host *shost, int dd_size)
 	ep->dev.class = &iscsi_endpoint_class;
 	if (shost)
 		ep->dev.parent = &shost->shost_gendev;
+	if (net)
+		ep->netns = net;
 	dev_set_name(&ep->dev, "ep-%d", id);
 	err = device_register(&ep->dev);
         if (err)
@@ -284,7 +288,20 @@ free_ep:
 	kfree(ep);
 	return NULL;
 }
+
+struct iscsi_endpoint *
+iscsi_create_endpoint(struct Scsi_Host *shost, int dd_size)
+{
+	return __iscsi_create_endpoint(shost, dd_size, NULL);
+}
 EXPORT_SYMBOL_GPL(iscsi_create_endpoint);
+
+struct iscsi_endpoint *
+iscsi_create_endpoint_net(struct net *net, int dd_size)
+{
+	return __iscsi_create_endpoint(NULL, dd_size, net);
+}
+EXPORT_SYMBOL_GPL(iscsi_create_endpoint_net);
 
 void iscsi_destroy_endpoint(struct iscsi_endpoint *ep)
 {
@@ -1604,10 +1621,15 @@ static int iscsi_setup_host(struct transport_container *tc, struct device *dev,
 {
 	struct Scsi_Host *shost = dev_to_shost(dev);
 	struct iscsi_cls_host *ihost = shost->shost_data;
+	struct iscsi_internal *priv = to_iscsi_internal(shost->transportt);
+	struct iscsi_transport *transport = priv->iscsi_transport;
 
 	memset(ihost, 0, sizeof(*ihost));
 	mutex_init(&ihost->mutex);
-	ihost->netns = &init_net;
+	if (transport->get_netns)
+		ihost->netns = transport->get_netns(shost);
+	else
+		ihost->netns = &init_net;
 
 	iscsi_bsg_host_add(shost, ihost);
 	/* ignore any bsg add error - we just can't do sgio */
@@ -3091,14 +3113,21 @@ static int
 iscsi_if_create_session(struct iscsi_internal *priv, struct iscsi_endpoint *ep,
 			struct iscsi_uevent *ev, pid_t pid,
 			uint32_t initial_cmdsn,	uint16_t cmds_max,
-			uint16_t queue_depth)
+			uint16_t queue_depth, struct net *net)
 {
 	struct iscsi_transport *transport = priv->iscsi_transport;
 	struct iscsi_cls_session *session;
 	struct Scsi_Host *shost;
 
-	session = transport->create_session(ep, cmds_max, queue_depth,
-					    initial_cmdsn);
+	if (ep) {
+		session = transport->create_session(ep, cmds_max, queue_depth,
+						    initial_cmdsn);
+	} else {
+		session = transport->create_session_net(net, cmds_max,
+							queue_depth,
+							initial_cmdsn);
+	}
+
 	if (!session)
 		return -ENOMEM;
 
@@ -3199,10 +3228,10 @@ static int iscsi_if_ep_connect(struct iscsi_transport *transport,
 	struct Scsi_Host *shost = NULL;
 	int non_blocking, err = 0;
 
-	if (!transport->ep_connect)
-		return -EINVAL;
-
 	if (msg_type == ISCSI_UEVENT_TRANSPORT_EP_CONNECT_THROUGH_HOST) {
+		if (!transport->ep_connect)
+			return -EINVAL;
+
 		shost = scsi_host_lookup(ev->u.ep_connect_through_host.host_no);
 		if (!shost) {
 			printk(KERN_ERR "ep connect failed. Could not find "
@@ -3211,11 +3240,17 @@ static int iscsi_if_ep_connect(struct iscsi_transport *transport,
 			return -ENODEV;
 		}
 		non_blocking = ev->u.ep_connect_through_host.non_blocking;
-	} else
-		non_blocking = ev->u.ep_connect.non_blocking;
+		dst_addr = (struct sockaddr *)((char *)ev + sizeof(*ev));
+		ep = transport->ep_connect(shost, dst_addr, non_blocking);
+	} else {
+		if (!transport->ep_connect_net)
+			return -EINVAL;
 
-	dst_addr = (struct sockaddr *)((char*)ev + sizeof(*ev));
-	ep = transport->ep_connect(shost, dst_addr, non_blocking);
+		non_blocking = ev->u.ep_connect.non_blocking;
+		dst_addr = (struct sockaddr *)((char *)ev + sizeof(*ev));
+		ep = transport->ep_connect_net(net, dst_addr, non_blocking);
+	}
+
 	if (IS_ERR(ep)) {
 		err = PTR_ERR(ep);
 		goto release_host;
@@ -3985,7 +4020,8 @@ static int iscsi_if_transport_conn(struct iscsi_transport *transport,
 		if (!ev->r.retcode)
 			WRITE_ONCE(conn->state, ISCSI_CONN_BOUND);
 
-		if (ev->r.retcode || !transport->ep_connect)
+		if (ev->r.retcode || (!transport->ep_connect &&
+				    !transport->ep_connect_net))
 			break;
 
 		ep = iscsi_lookup_endpoint(ev->u.b_conn.transport_eph);
@@ -4063,7 +4099,7 @@ iscsi_if_recv_msg(struct net *net, struct sk_buff *skb,
 					      portid,
 					      ev->u.c_session.initial_cmdsn,
 					      ev->u.c_session.cmds_max,
-					      ev->u.c_session.queue_depth);
+					      ev->u.c_session.queue_depth, net);
 		break;
 	case ISCSI_UEVENT_CREATE_BOUND_SESSION:
 		ep = iscsi_lookup_endpoint(ev->u.c_bound_session.ep_handle);
@@ -4076,7 +4112,7 @@ iscsi_if_recv_msg(struct net *net, struct sk_buff *skb,
 					portid,
 					ev->u.c_bound_session.initial_cmdsn,
 					ev->u.c_bound_session.cmds_max,
-					ev->u.c_bound_session.queue_depth);
+					ev->u.c_bound_session.queue_depth, net);
 		iscsi_put_endpoint(ep);
 		break;
 	case ISCSI_UEVENT_DESTROY_SESSION:
@@ -4342,7 +4378,7 @@ static ssize_t show_conn_ep_param_##param(struct device *dev,		\
 	 */								\
 	mutex_lock(&conn->ep_mutex);					\
 	ep = conn->ep;							\
-	if (!ep && t->ep_connect) {					\
+	if (!ep && (t->ep_connect || t->ep_connect_net)) {					\
 		mutex_unlock(&conn->ep_mutex);				\
 		return -ENOTCONN;					\
 	}								\

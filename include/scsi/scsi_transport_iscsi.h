@@ -35,6 +35,8 @@ struct iscsi_bus_flash_conn;
  * @name:		transport name
  * @caps:		iSCSI Data-Path capabilities
  * @create_session:	create new iSCSI session object
+ * @create_session_net: create new iSCSI session object without a bound host,
+ *			but with a specified net namespace
  * @destroy_session:	destroy existing iSCSI session object
  * @create_conn:	create new iSCSI connection
  * @bind_conn:		associate this connection with existing iSCSI session
@@ -77,6 +79,9 @@ struct iscsi_transport {
 	unsigned int caps;
 
 	struct iscsi_cls_session *(*create_session) (struct iscsi_endpoint *ep,
+					uint16_t cmds_max, uint16_t qdepth,
+					uint32_t sn);
+	struct iscsi_cls_session *(*create_session_net) (struct net *net,
 					uint16_t cmds_max, uint16_t qdepth,
 					uint32_t sn);
 	void (*destroy_session) (struct iscsi_cls_session *session);
@@ -122,6 +127,9 @@ struct iscsi_transport {
 	struct iscsi_endpoint *(*ep_connect) (struct Scsi_Host *shost,
 					      struct sockaddr *dst_addr,
 					      int non_blocking);
+	struct iscsi_endpoint *(*ep_connect_net) (struct net *net,
+					      struct sockaddr *dst_addr,
+					      int non_blocking);
 	int (*ep_poll) (struct iscsi_endpoint *ep, int timeout_ms);
 	void (*ep_disconnect) (struct iscsi_endpoint *ep);
 	int (*tgt_dscvr) (struct Scsi_Host *shost, enum iscsi_tgt_dscvr type,
@@ -156,6 +164,7 @@ struct iscsi_transport {
 	int (*logout_flashnode_sid) (struct iscsi_cls_session *cls_sess);
 	int (*get_host_stats) (struct Scsi_Host *shost, char *buf, int len);
 	u8 (*check_protection)(struct iscsi_task *task, sector_t *sector);
+	struct net *(*get_netns)(struct Scsi_Host *shost);
 };
 
 /*
@@ -313,6 +322,7 @@ struct iscsi_endpoint {
 	struct device dev;
 	int id;
 	struct iscsi_cls_conn *conn;
+	struct net *netns;		/* used if there's no parent shost */
 };
 
 struct iscsi_iface {
@@ -468,6 +478,8 @@ extern void iscsi_get_conn(struct iscsi_cls_conn *conn);
 extern void iscsi_unblock_session(struct iscsi_cls_session *session);
 extern void iscsi_block_session(struct iscsi_cls_session *session);
 extern struct iscsi_endpoint *iscsi_create_endpoint(struct Scsi_Host *shost,
+						    int dd_size);
+extern struct iscsi_endpoint *iscsi_create_endpoint_net(struct net *net,
 						    int dd_size);
 extern void iscsi_destroy_endpoint(struct iscsi_endpoint *ep);
 extern struct iscsi_endpoint *iscsi_lookup_endpoint(u64 handle);

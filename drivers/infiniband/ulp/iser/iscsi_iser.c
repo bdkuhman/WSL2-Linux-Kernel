@@ -590,20 +590,10 @@ static inline unsigned int iser_dif_prot_caps(int prot_caps)
 	return ret;
 }
 
-/**
- * iscsi_iser_session_create() - create an iscsi-iser session
- * @ep:             iscsi end-point handle
- * @cmds_max:       maximum commands in this session
- * @qdepth:         session command queue depth
- * @initial_cmdsn:  initiator command sequnce number
- *
- * Allocates and adds a scsi host, expose DIF supprot if
- * exists, and sets up an iscsi session.
- */
 static struct iscsi_cls_session *
-iscsi_iser_session_create(struct iscsi_endpoint *ep,
+__iscsi_iser_session_create(struct iscsi_endpoint *ep,
 			  uint16_t cmds_max, uint16_t qdepth,
-			  uint32_t initial_cmdsn)
+			  uint32_t initial_cmdsn, struct net *net)
 {
 	struct iscsi_cls_session *cls_session;
 	struct Scsi_Host *shost;
@@ -653,6 +643,8 @@ iscsi_iser_session_create(struct iscsi_endpoint *ep,
 		if (!(ib_dev->attrs.kernel_cap_flags & IBK_SG_GAPS_REG))
 			shost->virt_boundary_mask = SZ_4K - 1;
 
+		iscsi_host_set_netns(shost, ep->netns);
+
 		if (iscsi_host_add(shost, ib_dev->dev.parent)) {
 			mutex_unlock(&iser_conn->state_mutex);
 			goto free_host;
@@ -660,6 +652,7 @@ iscsi_iser_session_create(struct iscsi_endpoint *ep,
 		mutex_unlock(&iser_conn->state_mutex);
 	} else {
 		shost->can_queue = min_t(u16, cmds_max, ISER_DEF_XMIT_CMDS_MAX);
+		iscsi_host_set_netns(shost, net);
 		if (iscsi_host_add(shost, NULL))
 			goto free_host;
 	}
@@ -689,6 +682,34 @@ remove_host:
 free_host:
 	iscsi_host_free(shost);
 	return NULL;
+}
+
+/**
+ * iscsi_iser_session_create() - create an iscsi-iser session
+ * @ep:             iscsi end-point handle
+ * @cmds_max:       maximum commands in this session
+ * @qdepth:         session command queue depth
+ * @initial_cmdsn:  initiator command sequnce number
+ *
+ * Allocates and adds a scsi host, expose DIF support if
+ * exists, and sets up an iscsi session.
+ */
+static struct iscsi_cls_session *
+iscsi_iser_session_create(struct iscsi_endpoint *ep,
+			  uint16_t cmds_max, uint16_t qdepth,
+			  uint32_t initial_cmdsn)
+{
+	return __iscsi_iser_session_create(ep, cmds_max, qdepth,
+					   initial_cmdsn, NULL);
+}
+
+static struct iscsi_cls_session *
+iscsi_iser_session_create_net(struct net *net,
+			      uint16_t cmds_max, uint16_t qdepth,
+			      uint32_t initial_cmdsn)
+{
+	return __iscsi_iser_session_create(NULL, cmds_max, qdepth,
+					   initial_cmdsn, net);
 }
 
 static int iscsi_iser_set_param(struct iscsi_cls_conn *cls_conn,
@@ -794,7 +815,7 @@ static int iscsi_iser_get_ep_param(struct iscsi_endpoint *ep,
  * Return: iscsi_endpoint created by iscsi layer or ERR_PTR(error)
  *         if fails.
  */
-static struct iscsi_endpoint *iscsi_iser_ep_connect(struct Scsi_Host *shost,
+static struct iscsi_endpoint *iscsi_iser_ep_connect(struct net *net,
 						    struct sockaddr *dst_addr,
 						    int non_blocking)
 {
@@ -802,7 +823,7 @@ static struct iscsi_endpoint *iscsi_iser_ep_connect(struct Scsi_Host *shost,
 	struct iser_conn *iser_conn;
 	struct iscsi_endpoint *ep;
 
-	ep = iscsi_create_endpoint(shost, 0);
+	ep = iscsi_create_endpoint_net(net, 0);
 	if (!ep)
 		return ERR_PTR(-ENOMEM);
 
@@ -980,6 +1001,7 @@ static struct iscsi_transport iscsi_iser_transport = {
 	.caps                   = CAP_RECOVERY_L0 | CAP_MULTI_R2T | CAP_TEXT_NEGO,
 	/* session management */
 	.create_session         = iscsi_iser_session_create,
+	.create_session_net	= iscsi_iser_session_create_net,
 	.destroy_session        = iscsi_iser_session_destroy,
 	/* connection management */
 	.create_conn            = iscsi_iser_conn_create,
@@ -1007,9 +1029,11 @@ static struct iscsi_transport iscsi_iser_transport = {
 	/* recovery */
 	.session_recovery_timedout = iscsi_session_recovery_timedout,
 
-	.ep_connect             = iscsi_iser_ep_connect,
+	.ep_connect_net         = iscsi_iser_ep_connect,
 	.ep_poll                = iscsi_iser_ep_poll,
-	.ep_disconnect          = iscsi_iser_ep_disconnect
+	.ep_disconnect          = iscsi_iser_ep_disconnect,
+	/* net namespace */
+	.get_netns		= iscsi_host_get_netns,
 };
 
 static int __init iser_init(void)
