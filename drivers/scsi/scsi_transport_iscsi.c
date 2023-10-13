@@ -199,7 +199,7 @@ static struct net *iscsi_endpoint_net(struct iscsi_endpoint *ep)
 	return iscsi_host_net(ihost);
 }
 
-static const void *iscsi_endpoint_namespace(const struct device *dev)
+static const void *iscsi_endpoint_namespace(struct device *dev)
 {
 	struct iscsi_endpoint *ep = iscsi_dev_to_endpoint(dev);
 
@@ -363,7 +363,7 @@ static struct net *iscsi_iface_net(struct iscsi_iface *iface)
 	return iscsi_host_net(ihost);
 }
 
-static const void *iscsi_iface_namespace(const struct device *dev)
+static const void *iscsi_iface_namespace(struct device *dev)
 {
 	struct iscsi_iface *iface = iscsi_dev_to_iface(dev);
 
@@ -1305,7 +1305,7 @@ static struct net *iscsi_flashnode_conn_net(struct iscsi_flash_conn *f_conn)
 	return iscsi_flashnode_sess_net(f_sess);
 }
 
-static const void *iscsi_flashnode_namespace(const struct device *dev)
+static const void *iscsi_flashnode_namespace(struct device *dev)
 {
 	struct iscsi_flash_conn *f_conn;
 	struct iscsi_flash_session *f_sess;
@@ -1691,7 +1691,7 @@ struct transport_class cls = {						\
 	.configure = cfg,						\
 }
 
-static const void *iscsi_host_namespace(const struct device *dev)
+static const void *iscsi_host_namespace(struct device *dev)
 {
 	struct Scsi_Host *shost = transport_class_to_shost(dev);
 	struct iscsi_cls_host *ihost = shost->shost_data;
@@ -1716,7 +1716,7 @@ struct net *iscsi_sess_net(struct iscsi_cls_session *cls_session)
 }
 EXPORT_SYMBOL_GPL(iscsi_sess_net);
 
-static const void *iscsi_sess_namespace(const struct device *dev)
+static const void *iscsi_sess_namespace(struct device *dev)
 {
 	struct iscsi_cls_session *cls_session = transport_class_to_session(dev);
 
@@ -1738,7 +1738,7 @@ static struct net *iscsi_conn_net(struct iscsi_cls_conn *cls_conn)
 	return iscsi_sess_net(cls_session);
 }
 
-static const void *iscsi_conn_namespace(const struct device *dev)
+static const void *iscsi_conn_namespace(struct device *dev)
 {
 	struct iscsi_cls_conn *cls_conn = transport_class_to_conn(dev);
 
