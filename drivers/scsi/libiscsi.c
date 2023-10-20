@@ -3929,6 +3929,22 @@ int iscsi_host_set_param(struct Scsi_Host *shost, enum iscsi_host_param param,
 }
 EXPORT_SYMBOL_GPL(iscsi_host_set_param);
 
+void iscsi_host_set_netns(struct Scsi_Host *shost, struct net *netns)
+{
+	struct iscsi_host *ihost = shost_priv(shost);
+
+	ihost->net_ns = netns;
+}
+EXPORT_SYMBOL_GPL(iscsi_host_set_netns);
+
+struct net *iscsi_host_get_netns(struct Scsi_Host *shost)
+{
+	struct iscsi_host *ihost = shost_priv(shost);
+
+	return ihost->net_ns;
+}
+EXPORT_SYMBOL_GPL(iscsi_host_get_netns);
+
 MODULE_AUTHOR("Mike Christie");
 MODULE_DESCRIPTION("iSCSI library functions");
 MODULE_LICENSE("GPL");

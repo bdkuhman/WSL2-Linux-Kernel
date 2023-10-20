@@ -918,7 +918,7 @@ iscsi_sw_tcp_conn_get_stats(struct iscsi_cls_conn *cls_conn,
 }
 
 static struct iscsi_cls_session *
-iscsi_sw_tcp_session_create(struct iscsi_endpoint *ep, uint16_t cmds_max,
+iscsi_sw_tcp_session_create(struct net *net, uint16_t cmds_max,
 			    uint16_t qdepth, uint32_t initial_cmdsn)
 {
 	struct iscsi_cls_session *cls_session;
@@ -926,11 +926,6 @@ iscsi_sw_tcp_session_create(struct iscsi_endpoint *ep, uint16_t cmds_max,
 	struct iscsi_sw_tcp_host *tcp_sw_host;
 	struct Scsi_Host *shost;
 	int rc;
-
-	if (ep) {
-		printk(KERN_ERR "iscsi_tcp: invalid ep %p.\n", ep);
-		return NULL;
-	}
 
 	shost = iscsi_host_alloc(&iscsi_sw_tcp_sht,
 				 sizeof(struct iscsi_sw_tcp_host), 1);
@@ -948,6 +943,9 @@ iscsi_sw_tcp_session_create(struct iscsi_endpoint *ep, uint16_t cmds_max,
 		goto free_host;
 	shost->can_queue = rc;
 
+	tcp_sw_host = iscsi_host_priv(shost);
+	iscsi_host_set_netns(shost, net);
+
 	if (iscsi_host_add(shost, NULL))
 		goto free_host;
 
@@ -964,7 +962,6 @@ iscsi_sw_tcp_session_create(struct iscsi_endpoint *ep, uint16_t cmds_max,
 		goto remove_session;
 
 	/* We are now fully setup so expose the session to sysfs. */
-	tcp_sw_host = iscsi_host_priv(shost);
 	tcp_sw_host->session = session;
 	return cls_session;
 
@@ -1095,7 +1092,7 @@ static struct iscsi_transport iscsi_sw_tcp_transport = {
 	.caps			= CAP_RECOVERY_L0 | CAP_MULTI_R2T | CAP_HDRDGST
 				  | CAP_DATADGST,
 	/* session management */
-	.create_session		= iscsi_sw_tcp_session_create,
+	.create_session_net	= iscsi_sw_tcp_session_create,
 	.destroy_session	= iscsi_sw_tcp_session_destroy,
 	/* connection management */
 	.create_conn		= iscsi_sw_tcp_conn_create,
@@ -1123,6 +1120,8 @@ static struct iscsi_transport iscsi_sw_tcp_transport = {
 	.alloc_pdu		= iscsi_sw_tcp_pdu_alloc,
 	/* recovery */
 	.session_recovery_timedout = iscsi_session_recovery_timedout,
+	/* net namespace */
+	.get_netns		= iscsi_host_get_netns,
 };
 
 static int __init iscsi_sw_tcp_init(void)

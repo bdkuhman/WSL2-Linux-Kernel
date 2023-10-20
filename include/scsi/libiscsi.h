@@ -383,6 +383,7 @@ struct iscsi_host {
 	int			state;
 
 	struct workqueue_struct	*workq;
+	struct net *net_ns;
 };
 
 /*
@@ -491,6 +492,9 @@ extern void iscsi_complete_scsi_task(struct iscsi_task *task,
 extern void iscsi_pool_free(struct iscsi_pool *);
 extern int iscsi_pool_init(struct iscsi_pool *, int, void ***, int);
 extern int iscsi_switch_str_param(char **, char *);
+
+extern void iscsi_host_set_netns(struct Scsi_Host *, struct net *);
+extern struct net *iscsi_host_get_netns(struct Scsi_Host *);
 
 /*
  * inline functions to deal with padding.
